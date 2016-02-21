@@ -8,16 +8,24 @@
 	wget https://bootstrap.pypa.io/get-pip.py
 	python get-pip.py
 
-### Install other dependencies
+### Install other dependencies (ignore this step please.)
 	pip install -r requirements.txt
 	
 ### Install TensorFlow
 Currently, TensorFlow not included in the pip repository, we have to install it manually.
 
-	pip install --upgrade https://storage.googleapis.com/tensorflow/mac/	tensorflow-0.6.0-py2-none-any.whl
+	pip install --upgrade https://storage.googleapis.com/tensorflow/mac/tensorflow-0.6.0-py2-none-any.whl
 
 ## Run the demo application
 	python mnist.py
 	
 It will take about one hour and a half to train the dataset.
 		
+## Timing
+Timing with `time`:
+
+	time python mnist.py
+
+Timing with `cProfile` module:
+	
+	python -m cProfile mnist.py 
