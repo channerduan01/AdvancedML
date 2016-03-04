@@ -25,9 +25,9 @@
       "op": "Convolution", 
       "param": {
         "dilate": "(1,1)", 
-        "kernel": "(5,5)", 
+        "kernel": "(4,4)", 
         "no_bias": "False", 
-        "num_filter": "32", 
+        "num_filter": "20", 
         "num_group": "1", 
         "pad": "(0,0)", 
         "stride": "(1,1)", 
@@ -76,7 +76,7 @@
         "dilate": "(1,1)", 
         "kernel": "(5,5)", 
         "no_bias": "False", 
-        "num_filter": "64", 
+        "num_filter": "40", 
         "num_group": "1", 
         "pad": "(0,0)", 
         "stride": "(1,1)", 
@@ -99,7 +99,7 @@
         "kernel": "(2,2)", 
         "pad": "(0,0)", 
         "pool_type": "max", 
-        "stride": "(2,2)"
+        "stride": "(3,3)"
       }, 
       "name": "pooling1", 
       "inputs": [[9, 0]], 
@@ -130,7 +130,7 @@
       "op": "FullyConnected", 
       "param": {
         "no_bias": "False", 
-        "num_hidden": "500"
+        "num_hidden": "150"
       }, 
       "name": "fullyconnected0", 
       "inputs": [[11, 0], [12, 0], [13, 0]], 

@@ -9,8 +9,8 @@ sys.path.append("../common")
 import mxnet as mx
 from timer import Timer
 import numpy as np
-from numpy import savetxt
-import logging
+import mxnet.optimizer as opt
+from numpy import genfromtxt, savetxt
 
 def get_mlp():
     """
@@ -56,61 +56,98 @@ def get_lenet():
     lenet = mx.symbol.SoftmaxOutput(data=fc2, name='softmax')
     return lenet
     
-def fit(network,shape,iteration,baseModel=None):
-    num_epochs = iteration
-    batch = 128
+def get_dnn():
+    data = mx.symbol.Variable('data')
+    # first conv
+    conv1 = mx.symbol.Convolution(data=data, kernel=(4,4), num_filter=20)
+    tanh1 = mx.symbol.Activation(data=conv1, act_type="tanh")
+    pool1 = mx.symbol.Pooling(data=tanh1, pool_type="max",
+                              kernel=(2,2), stride=(2,2))
+    # second conv
+    conv2 = mx.symbol.Convolution(data=pool1, kernel=(5,5), num_filter=40)
+    tanh2 = mx.symbol.Activation(data=conv2, act_type="tanh")
+    pool2 = mx.symbol.Pooling(data=tanh2, pool_type="max",
+                              kernel=(2,2), stride=(3,3))
+    # first fullc
+    flatten = mx.symbol.Flatten(data=pool2)
+    fc1 = mx.symbol.FullyConnected(data=flatten, num_hidden=150)
+    tanh3 = mx.symbol.Activation(data=fc1, act_type="tanh")
+    # second fullc
+    fc2 = mx.symbol.FullyConnected(data=tanh3, num_hidden=10)
+    # loss
+    lenet = mx.symbol.SoftmaxOutput(data=fc2, name='softmax')
+    return lenet    
 
-    head = '%(asctime)-15s Node %(message)s'
-    logging.basicConfig(level=logging.DEBUG, format=head)
+tParam = None
     
-    print 'start load data...'
-    train = mx.io.CSVIter(
-        data_csv='data.csv',
-#        data_csv='anne_data_train.csv',     
-        
-        data_shape=shape,
-        label_csv='data_label.csv',
-        label_shape=(1,),
-        batch_size=batch)
+def fit(network,shape,num_epochs,baseModel=None):
+    batch = 256
+    learning_rate = 0.001
+
+#    head = '%(asctime)-15s Node %(message)s'
+#    logging.basicConfig(level=logging.DEBUG, format=head)
+    
+#    print 'start load data...'
+#    train = mx.io.CSVIter(
+#        data_csv='data.csv',
+#        data_shape=shape,
+#        label_csv='data_label.csv',
+#        label_shape=(1,),
+##        shuffle=True,
+#        batch_size=batch)
     valid = mx.io.CSVIter(
         data_csv='valid.csv',
-#        data_csv='anne_data_valid.csv',
-        
         data_shape=shape,
         label_csv='valid_label.csv',
         label_shape=(1,),
         batch_size=batch)
+        
     print 'start trainning...'
     model_args = {}
     if baseModel is not None:
         model_args = {'arg_params' : baseModel.arg_params,
                   'aux_params' : baseModel.aux_params,
-                  'begin_epoch' : baseModel.begin_epoch}        
-        
+                  'begin_epoch' : baseModel.begin_epoch}
+
+    sgd_opt = opt.SGD(learning_rate=learning_rate, momentum=0.9, wd=0.0001, rescale_grad=(1.0/batch))
     model = mx.model.FeedForward(
         ctx                = mx.cpu(),
         symbol             = network,
         num_epoch          = num_epochs,
-        learning_rate      = 0.002,
-        momentum           = 0.9,
-        wd                 = 0.00001,
-        initializer        = mx.init.Xavier(factor_type="in", magnitude=2.34),
+        optimizer          = sgd_opt,
+        initializer        = mx.init.Uniform(0.05),
         **model_args)
+    def batch_callback(param):
+        global tParam
+        tParam = param
+        if (param.nbatch % 20 == 0):
+            print 'nbatch:%d' % (param.nbatch)
+    def epoch_callback(epoch, symbol, arg_params, aux_params):
+        global train_data
+        global train_label
+        print 'first 10 train mark: %f' %np.sum(train_data[0:10])
+        if sgd_opt.lr > 0.00003:
+#            sgd_opt.lr *= 0.993
+            sgd_opt.lr *= 0.99
+#        print 'nepoch:%d, learning rate:%f' % (epoch, sgd_opt.lr)
+        np.random.shuffle(shuffle_index)
+        train_data = train_data[shuffle_index]
+        train_label = train_label[shuffle_index]
     model.fit(
-        X                  = train,
+        X = train_data,
+        y = train_label,
+#        eval_data = (valid_data,valid_label),
+#        X                  = train,
         eval_data          = valid,
         kvstore            = None,
-        batch_end_callback = mx.callback.Speedometer(True,20),
-        epoch_end_callback = None)
+        batch_end_callback = batch_callback,
+        epoch_end_callback = epoch_callback)
     print 'finish trainning'
     return model,valid
-
 
 def output(model,shape):
     test = mx.io.CSVIter(
         data_csv='test_ready.csv',
-#        data_csv='anne_test.csv',
-        
         data_shape=shape,
         batch_size=500)
     with Timer() as t:
@@ -119,18 +156,27 @@ def output(model,shape):
     savetxt('submission.csv', np.c_[np.arange(1, res.size+1), res], delimiter=',', header='ImageId,Label', fmt='%d', comments='')
     return
 
-prefix = 'mnist'
-iteration = 12
 
-#shape = (128,)          # for Anne...
+
+#train_data = genfromtxt(open('data.csv','r'), delimiter=',', dtype='f8')
+#train_data = train_data.reshape((len(train_data),1,28,28))
+#train_label = genfromtxt(open('data_label.csv','r'), delimiter=',', dtype='f8')
+#valid_data = train_data.copy()
+#valid_label = train_label.copy()
+
+shuffle_index = np.arange(len(train_data))
+
+prefix = 'mnist'
+iteration = 30
+
 ##shape = (784,)          # for MLP
 shape = (1, 28, 28)     # for convolution
 
 model_loaded = None
-#model_loaded = mx.model.FeedForward.load(prefix, 20)
+#model_loaded = mx.model.FeedForward.load(prefix, 210)
 with Timer() as t:
 #    model,valid = fit(get_mlp(),shape,iteration,model_loaded)
-    model,valid = fit(get_lenet(),shape,iteration,model_loaded)
+    model,valid = fit(get_dnn(),shape,iteration,model_loaded)
     model.save(prefix, iteration)
 print "=> training spent: %s s" % t.secs
 
