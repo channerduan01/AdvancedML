@@ -28,7 +28,6 @@ def get_mlp():
     mlp  = mx.symbol.SoftmaxOutput(data = fc3, name = 'softmax')
     return mlp
 
-
 def get_lenet():
     """
     LeCun, Yann, Leon Bottou, Yoshua Bengio, and Patrick
@@ -91,27 +90,33 @@ def batch_callback(param):
 def epoch_callback(epoch, symbol, arg_params, aux_params):
     global train_data
     global train_label
-    print 'first 10 train mark: %f' %np.sum(train_data[0:10])
-#    if sgd_opt.lr > 0.00003:
-#        sgd_opt.lr = anneal_lr**epoch*basic_lr # 0.993
-#        print 'Epoch[%d] learning rate:%f' % (epoch, sgd_opt.lr)
+    global model
+    print 'first 100 train mark: %f' %np.sum(train_data[0:100])
+    opt = model.optimizer
+    if opt.lr > 0.00003:
+        opt.lr = anneal_lr**epoch*basic_lr
+        print 'Epoch[%d] learning rate:%f' %(epoch, opt.lr)
     index = np.arange(len(train_data))
     np.random.shuffle(index)
     train_data = train_data[index]
     train_label = train_label[index]
-
-def createModel():
+    
+def createOptimizer(epoch_process):
     sgd_opt = opt.SGD(
-    learning_rate=anneal_lr**0*basic_lr,
-        momentum=0.9, 
-        wd=0.0001, 
-        rescale_grad=(1.0/batch_size))
+        learning_rate=anneal_lr**epoch_process*basic_lr,
+        momentum=0.9,
+        wd=0.0001,
+        rescale_grad=(1.0/batch_size)
+        )
+    return sgd_opt
+    
+def createModel():
     model = mx.model.FeedForward(
         ctx                = mx.cpu(),
         symbol             = get_dnn(),
         num_epoch          = None,
         numpy_batch_size   = batch_size,
-        optimizer          = sgd_opt,
+        optimizer          = createOptimizer(0),
         initializer        = mx.init.Uniform(0.05))
     return model
 
@@ -127,8 +132,8 @@ def makePrediction(model,shape):
     return
 
 prefix = 'cnn_00_' # 28*28,, shuffle, anneal learning rate
-load_target = 0
-iteration_target = 20
+load_target = 10
+iteration_target = 10
 ##shape = (784,)          # for MLP
 data_shape = (1, 28, 28)     # for convolution
 
@@ -147,22 +152,28 @@ if not 'valid_data' in dir():
 valid_data.reset()
 #--------------------- model establish
 if load_target > 0:
-    model = mx.model.FeedForward.load(prefix, load_target)
-    model.num_epoch = iteration_target+load_target
+    model = mx.model.FeedForward.load(
+        prefix=prefix,
+        epoch=load_target
+        )
+    model.optimizer = createOptimizer(load_target)
+    model.num_epoch = load_target+iteration_target
+    model.numpy_batch_size = batch_size
 else:
     model = createModel()
     model.num_epoch = iteration_target
 #--------------------- model training
 with Timer() as t:
     model.fit(
-    X = train_data,
-    y = train_label,
-    eval_data= valid,
-    kvstore = None,
-    batch_end_callback = batch_callback,
-    epoch_end_callback = epoch_callback)
+        X = train_data,
+        y = train_label,
+        eval_data= valid_data,
+        kvstore = None,
+        batch_end_callback = batch_callback,
+        epoch_end_callback = epoch_callback
+    )
 print "=> trained[%d->%d] cost: %s s" %(load_target,load_target+iteration_target,t.secs)
-model.save(prefix, iteration)
+model.save(prefix, load_target+iteration_target)
 #--------------------- prediction
 # makePrediction(model,date_shape)
 
