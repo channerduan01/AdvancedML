@@ -28,6 +28,7 @@ def get_mlp():
     mlp  = mx.symbol.SoftmaxOutput(data = fc3, name = 'softmax')
     return mlp
 
+
 def get_lenet():
     """
     LeCun, Yann, Leon Bottou, Yoshua Bengio, and Patrick
@@ -54,7 +55,7 @@ def get_lenet():
     # loss
     lenet = mx.symbol.SoftmaxOutput(data=fc2, name='softmax')
     return lenet
-
+    
 def get_dnn():
     data = mx.symbol.Variable('data')
     # first conv
@@ -77,117 +78,113 @@ def get_dnn():
     lenet = mx.symbol.SoftmaxOutput(data=fc2, name='softmax')
     return lenet    
 
-batch_size = 128
-basic_lr = 0.0018
-anneal_lr = 0.991 #0.993
 tParam = None
-def batch_callback(param):
-    global tParam
-    tParam = param
-    if (param.nbatch % 30 == 0):
-        print 'nbatch:%d' % (param.nbatch)
+    
+def fit(network,shape,num_epochs,baseModel=None):
+    batch = 256
+    learning_rate = 0.001
 
-def epoch_callback(epoch, symbol, arg_params, aux_params):
-    global train_data
-    global train_label
-    global model
-    if (epoch > 0 and epoch % check_point_step == 0):
-        model.save(prefix, epoch)
-    print 'first 100 train mark: %f' %np.sum(train_data[0:100])
-    opt = model.optimizer
-    if opt.lr > 0.00003:
-        opt.lr = anneal_lr**epoch*basic_lr
-        print 'Epoch[%d] learning rate:%f' %(epoch, opt.lr)
-    index = np.arange(len(train_data))
-    np.random.shuffle(index)
-    train_data = train_data[index]
-    train_label = train_label[index]
+#    head = '%(asctime)-15s Node %(message)s'
+#    logging.basicConfig(level=logging.DEBUG, format=head)
     
-def createOptimizer(epoch_process):
-    sgd_opt = opt.SGD(
-        learning_rate=anneal_lr**epoch_process*basic_lr,
-        momentum=0.9,
-        wd=0.0001,
-        rescale_grad=(1.0/batch_size)
-        )
-    return sgd_opt
-    
-def createModel():
+#    print 'start load data...'
+#    train = mx.io.CSVIter(
+#        data_csv='data.csv',
+#        data_shape=shape,
+#        label_csv='data_label.csv',
+#        label_shape=(1,),
+##        shuffle=True,
+#        batch_size=batch)
+    valid = mx.io.CSVIter(
+        data_csv='valid.csv',
+        data_shape=shape,
+        label_csv='valid_label.csv',
+        label_shape=(1,),
+        batch_size=batch)
+        
+    print 'start trainning...'
+    model_args = {}
+    if baseModel is not None:
+        model_args = {'arg_params' : baseModel.arg_params,
+                  'aux_params' : baseModel.aux_params,
+                  'begin_epoch' : baseModel.begin_epoch}
+
+    sgd_opt = opt.SGD(learning_rate=learning_rate, momentum=0.9, wd=0.0001, rescale_grad=(1.0/batch))
     model = mx.model.FeedForward(
         ctx                = mx.cpu(),
-        symbol             = get_dnn(),
-        num_epoch          = None,
-        numpy_batch_size   = batch_size,
-        optimizer          = createOptimizer(0),
-        initializer        = mx.init.Uniform(0.05))
-    return model
+        symbol             = network,
+        num_epoch          = num_epochs,
+        optimizer          = sgd_opt,
+        initializer        = mx.init.Uniform(0.05),
+        **model_args)
+    def batch_callback(param):
+        global tParam
+        tParam = param
+        if (param.nbatch % 20 == 0):
+            print 'nbatch:%d' % (param.nbatch)
+    def epoch_callback(epoch, symbol, arg_params, aux_params):
+        global train_data
+        global train_label
+        print 'first 10 train mark: %f' %np.sum(train_data[0:10])
+        if sgd_opt.lr > 0.00003:
+#            sgd_opt.lr *= 0.993
+            sgd_opt.lr *= 0.99
+#        print 'nepoch:%d, learning rate:%f' % (epoch, sgd_opt.lr)
+        np.random.shuffle(shuffle_index)
+        train_data = train_data[shuffle_index]
+        train_label = train_label[shuffle_index]
+    model.fit(
+        X = train_data,
+        y = train_label,
+#        eval_data = (valid_data,valid_label),
+#        X                  = train,
+        eval_data          = valid,
+        kvstore            = None,
+        batch_end_callback = batch_callback,
+        epoch_end_callback = epoch_callback)
+    print 'finish trainning'
+    return model,valid
 
-def makePrediction(model,shape):
+def output(model,shape):
     test = mx.io.CSVIter(
         data_csv='test_ready.csv',
         data_shape=shape,
-        batch_size=512)
+        batch_size=500)
     with Timer() as t:
         res = np.argmax(model.predict(test),1)
-    print "=> prediction cost: %s s" % t.secs
+    print "=> prediction spent: %s s" % t.secs
     savetxt('submission.csv', np.c_[np.arange(1, res.size+1), res], delimiter=',', header='ImageId,Label', fmt='%d', comments='')
     return
-    
-#prefix = 'cnn_00_' # 28*28,, shuffle,anneal_lr=0.994,basic_lr=0.003,batch_size=256,, 98.5+
-#prefix = 'cnn_01_' # 28*28,, shuffle,anneal_lr=0.994,basic_lr=0.003,batch_size=128,, 98.7+
-prefix = 'cnn_02_' # 28*28,, shuffle,anneal_lr=0.991,basic_lr=0.0018,batch_size=128,, 98.6+
 
 
-check_point_step = 20
-load_target = 220
-iteration_target = 600
+
+#train_data = genfromtxt(open('data.csv','r'), delimiter=',', dtype='f8')
+#train_data = train_data.reshape((len(train_data),1,28,28))
+#train_label = genfromtxt(open('data_label.csv','r'), delimiter=',', dtype='f8')
+#valid_data = train_data.copy()
+#valid_label = train_label.copy()
+
+shuffle_index = np.arange(len(train_data))
+
+prefix = 'mnist'
+iteration = 30
+
 ##shape = (784,)          # for MLP
-data_shape = (1, 28, 28)     # for convolution
+shape = (1, 28, 28)     # for convolution
 
-#--------------------- data preparation
-if not 'train_data' in dir() or not 'train_label' in dir():
-    train_data = genfromtxt(open('data.csv','r'), delimiter=',', dtype='f8')
-    train_data = train_data.reshape((len(train_data),1,28,28))
-    train_label = genfromtxt(open('data_label.csv','r'), delimiter=',', dtype='f8')
-if not 'valid_data' in dir():
-    valid_data = mx.io.CSVIter(
-        data_csv='valid.csv',
-        data_shape=data_shape,
-        label_csv='valid_label.csv',
-        label_shape=(1,),
-        batch_size=512)
-valid_data.reset()
-#--------------------- model establish
-if load_target > 0:
-    model = mx.model.FeedForward.load(
-        prefix=prefix,
-        epoch=load_target
-        )
-    model.optimizer = createOptimizer(load_target)
-    model.num_epoch = load_target+iteration_target
-    model.numpy_batch_size = batch_size
-else:
-    model = createModel()
-    model.num_epoch = iteration_target
-#--------------------- model training
-#with Timer() as t:
-#    model.fit(
-#        X = train_data,
-#        y = train_label,
-#        eval_data= valid_data,
-#        kvstore = None,
-#        batch_end_callback = batch_callback,
-#        epoch_end_callback = epoch_callback
-#        )
-#    model.save(prefix, model.num_epoch)
-#print "=> trained[%d->%d] cost: %s s" %(load_target,load_target+iteration_target,t.secs)
-#--------------------- prediction
-makePrediction(model,data_shape)
+model_loaded = None
+#model_loaded = mx.model.FeedForward.load(prefix, 210)
+with Timer() as t:
+#    model,valid = fit(get_mlp(),shape,iteration,model_loaded)
+    model,valid = fit(get_dnn(),shape,iteration,model_loaded)
+    model.save(prefix, iteration)
+print "=> training spent: %s s" % t.secs
 
+#valid.reset()
+#res = np.argmax(model.predict(valid),1)
 
-
-
-
+#model_loaded = mx.model.FeedForward.load(prefix, iteration)
+#output(model_loaded,shape)
 
 
 
