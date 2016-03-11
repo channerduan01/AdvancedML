@@ -12,6 +12,38 @@ import numpy as np
 import mxnet.optimizer as opt
 from numpy import genfromtxt, savetxt
 
+import matplotlib.pyplot as plt
+from scipy.ndimage.interpolation import map_coordinates
+from scipy.ndimage.filters import gaussian_filter
+
+
+def drawFigures(params):
+    length = len(params)
+    if (length < 2 or length%2 == 1):
+        raise Exception("illegal input")
+    for i in range(0,length,4):
+        plt.figure()
+        plt.subplot(121)
+        plt.title(params[i])
+        plt.axis('off')
+        plt.imshow(params[i+1])
+        if (i+2 < length):
+            plt.subplot(122)
+            plt.title(params[i+2])
+            plt.axis('off')
+            plt.imshow(params[i+3])
+    return
+random_state = np.random.RandomState(None)
+def elastic_distortion(image, alpha, sigma):
+    s = image.shape
+    dx = gaussian_filter(random_state.rand(*s) * 2 - 1, sigma, mode="constant", cval=0) * alpha
+    dy = gaussian_filter(random_state.rand(*s) * 2 - 1, sigma, mode="constant", cval=0) * alpha
+    x, y = np.meshgrid(np.arange(s[0]), np.arange(s[1]))
+    indices = np.reshape(y+dy, (-1, 1)), np.reshape(x+dx, (-1, 1))
+    return map_coordinates(image, indices, order=1).reshape(s)
+
+
+
 def get_mlp():
     """
     multi-layer perceptron
@@ -75,33 +107,39 @@ def get_dnn():
     fc2 = mx.symbol.FullyConnected(data=tanh3, num_hidden=10)
     # loss
     lenet = mx.symbol.SoftmaxOutput(data=fc2, name='softmax')
-    return lenet    
+    return lenet
+    
 
-batch_size = 128
-basic_lr = 0.0018
-anneal_lr = 0.991 #0.993
-tParam = None
-def batch_callback(param):
-    global tParam
-    tParam = param
-    if (param.nbatch % 30 == 0):
-        print 'nbatch:%d' % (param.nbatch)
-
-def epoch_callback(epoch, symbol, arg_params, aux_params):
+def train_data_refresh():
     global train_data
     global train_label
-    global model
-    if (epoch > 0 and epoch % check_point_step == 0):
-        model.save(prefix, epoch)
-    print 'first 100 train mark: %f' %np.sum(train_data[0:100])
-    opt = model.optimizer
-    if opt.lr > 0.00003:
-        opt.lr = anneal_lr**epoch*basic_lr
-        print 'Epoch[%d] learning rate:%f' %(epoch, opt.lr)
+    global train_data_tmp
     index = np.arange(len(train_data))
     np.random.shuffle(index)
     train_data = train_data[index]
     train_label = train_label[index]
+    print 'data refresh start...'
+    for i in range(len(train_data)):
+        train_data_tmp[i,0] = elastic_distortion(train_data[i,0],500,30)
+    print 'first 100 train mark: %.0f - %.0f' %(np.sum(train_data[0:100]),np.sum(train_data_tmp[0:100]))
+    print 'data refresh finish...'
+
+batch_size = 128
+basic_lr = 0.003
+anneal_lr = 0.994 #0.993
+def batch_callback(param):
+    if (param.nbatch % 30 == 0):
+        print 'nbatch:%d' % (param.nbatch)
+
+def epoch_callback(epoch, symbol, arg_params, aux_params):
+    global model
+    if (epoch > 0 and epoch % check_point_step == 0):
+        model.save(prefix, epoch)
+    train_data_refresh()
+    opt = model.optimizer
+    if opt.lr > 0.00003:
+        opt.lr = anneal_lr**epoch*basic_lr
+        print 'Epoch[%d] learning rate:%f' %(epoch, opt.lr)
     
 def createOptimizer(epoch_process):
     sgd_opt = opt.SGD(
@@ -135,12 +173,14 @@ def makePrediction(model,shape):
     
 #prefix = 'cnn_00_' # 28*28,, shuffle,anneal_lr=0.994,basic_lr=0.003,batch_size=256,, 98.5+
 #prefix = 'cnn_01_' # 28*28,, shuffle,anneal_lr=0.994,basic_lr=0.003,batch_size=128,, 98.7+
-prefix = 'cnn_02_' # 28*28,, shuffle,anneal_lr=0.991,basic_lr=0.0018,batch_size=128,, 98.6+
-
+#prefix = 'cnn_02_' # 28*28,, shuffle,anneal_lr=0.991,basic_lr=0.0018,batch_size=128,, 98.6+
+#prefix = 'cnn_03_' # 28*28,, shuffle,anneal_lr=0.994,basic_lr=0.003,batch_size=64,, 98.6+
+#prefix = 'cnn_04_' # 28*28,, shuffle,anneal_lr=0.99,basic_lr=0.002,batch_size=50,, 98.7+
+prefix = 'cnn_05_' # 28*28,, shuffle,distortion(500,30),anneal_lr=0.994,basic_lr=0.003,batch_size=128,,
 
 check_point_step = 20
-load_target = 220
-iteration_target = 600
+load_target = 0
+iteration_target = 100
 ##shape = (784,)          # for MLP
 data_shape = (1, 28, 28)     # for convolution
 
@@ -149,6 +189,7 @@ if not 'train_data' in dir() or not 'train_label' in dir():
     train_data = genfromtxt(open('data.csv','r'), delimiter=',', dtype='f8')
     train_data = train_data.reshape((len(train_data),1,28,28))
     train_label = genfromtxt(open('data_label.csv','r'), delimiter=',', dtype='f8')
+train_data_tmp = np.zeros_like(train_data)
 if not 'valid_data' in dir():
     valid_data = mx.io.CSVIter(
         data_csv='valid.csv',
@@ -170,24 +211,31 @@ else:
     model = createModel()
     model.num_epoch = iteration_target
 #--------------------- model training
-#with Timer() as t:
-#    model.fit(
-#        X = train_data,
-#        y = train_label,
-#        eval_data= valid_data,
-#        kvstore = None,
-#        batch_end_callback = batch_callback,
-#        epoch_end_callback = epoch_callback
-#        )
-#    model.save(prefix, model.num_epoch)
-#print "=> trained[%d->%d] cost: %s s" %(load_target,load_target+iteration_target,t.secs)
+with Timer() as t:
+    train_data_refresh()
+    model.fit(
+        X = train_data_tmp,
+        y = train_label,
+        eval_data= valid_data,
+        kvstore = None,
+        batch_end_callback = batch_callback,
+        epoch_end_callback = epoch_callback
+        )
+    model.save(prefix, model.num_epoch)
+print "=> trained[%d->%d] cost: %s s" %(load_target,load_target+iteration_target,t.secs)
 #--------------------- prediction
-makePrediction(model,data_shape)
+#makePrediction(model,data_shape)
 
 
-
-
-
+#--------------------- draw test
+#plt.gray()
+#list_ = []
+#for i in range(8):
+#    list_.append('original image:%d' %i)
+#    list_.append(train_data[i,0])
+#    list_.append('distort')
+#    list_.append(elastic_distortion(train_data[i,0],500,30))
+#drawFigures(list_)
 
 
 
