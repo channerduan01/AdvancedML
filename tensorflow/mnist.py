@@ -10,6 +10,7 @@ Copyright (c) 2016 Darcy. All rights reserved.
 import sys
 import os
 import time
+import argparse
 import pandas as pd
 import numpy as np
 import tensorflow as tf
@@ -130,9 +131,20 @@ def conv():
 
 
 def cnn():
-    NUM_ITERAtION = 30000
+    NUM_ITERAtION = 25000
     VALIDATION_SIZE = 2000
     IMAGE_TO_DISPLAY = 10
+
+        # read test data from CSV file
+    test_images = pd.read_csv('../mnist_raw/test.csv').values
+    test_images = test_images.astype(np.float)
+    test_images = (test_images - (255.0 / 2.0)) / 255.0
+
+    print('test_images({0[0]},{0[1]})'.format(test_images.shape))
+
+    test_labels = np.loadtxt('submission_test.csv', np.int32,  delimiter=',', skiprows=1)
+    test_labels = test_labels[:, 1]
+    print(test_labels.shape)
 
     data = pd.read_csv('../mnist_raw/train.csv')
 
@@ -200,7 +212,7 @@ def cnn():
     W_fc2 = weight_variable([1024, 10])
     b_fc2 = bias_variable([10])
 
-    y_conv=tf.nn.softmax(tf.matmul(h_fc1_drop, W_fc2) + b_fc2)
+    y_conv = tf.nn.softmax(tf.matmul(h_fc1_drop, W_fc2) + b_fc2)
 
     cross_entropy = -tf.reduce_sum(y_*tf.log(y_conv))
     train_step = tf.train.AdamOptimizer(1e-4).minimize(cross_entropy)
@@ -217,27 +229,29 @@ def cnn():
         if i%100 == 0:
             train_accuracy = accuracy.eval(feed_dict={x:validation_images, y_: validation_labels, keep_prob: 1.0})
             print "step %d, training accuracy %g"%(i, train_accuracy)
+
+        if i%1000 == 0:
+            predicted_lables = accuracy.eval(feed_dict={x: test_images, keep_prob: 1.0})
+            error_rate = 100.0 - (100.0 * np.sum(predicted_lables == test_labels) / predicted_lables.shape[0])
+            
+            print 'error_rate', error_rate
+
+            np.savetxt('data/submission_cnn_%d.csv' % i,
+                np.c_[range(1,len(predicted_lables)+1), predicted_lables],
+                delimiter=',',
+                header = 'ImageId,Label',
+                comments = '',
+                fmt ='%d')    
         train_step.run(feed_dict={x: batch_xs, y_: batch_ys, keep_prob: 0.5})
 
         start = end
         if (start + 50) > len(train_images):
             start = 0
 
-    # read test data from CSV file
-    test_images = pd.read_csv('../mnist_raw/test.csv').values
-    test_images = test_images.astype(np.float)
-    test_images = (test_images - (255.0 / 2.0)) / 255.0
-
-    print('test_images({0[0]},{0[1]})'.format(test_images.shape))
-
     predict = tf.argmax(y_conv, 1)
     predicted_lables = predict.eval(feed_dict={x: test_images, keep_prob: 1.0})
 
     print(predicted_lables.shape)
-    test_labels = np.loadtxt('submission_test.csv', np.int32,  delimiter=',', skiprows=1)
-    test_labels = test_labels[:, 1]
-    print(test_labels.shape)
-
     error_rate = 100.0 - (100.0 * np.sum(predicted_lables == test_labels) / predicted_lables.shape[0])
     print('error_rate', error_rate)
 
@@ -249,9 +263,114 @@ def cnn():
                fmt ='%d')
 
 
+def summary():
+    mnist = input_data.read_data_sets('MNIST_data/', one_hot=True)
+
+    x = tf.placeholder(tf.float32, [None, 784], name='x-input')
+    W = tf.Variable(tf.zeros([784, 10]), name='weights')
+    b = tf.Variable(tf.zeros([10]), name='bias')
+    y = tf.nn.softmax(tf.matmul(x, W) + b)
+    y_ = tf.placeholder(tf.float32, [None, 10])
+    cross_entropy = -tf.reduce_sum(y_*tf.log(y))
+    _ = tf.scalar_summary("cross entropy", cross_entropy)
+
+    train_step = tf.train.GradientDescentOptimizer(0.01).minimize(cross_entropy)
+
+    correct_prediction = tf.equal(tf.argmax(y,1), tf.argmax(y_,1))
+    accuracy = tf.reduce_mean(tf.cast(correct_prediction, 'float'))
+    _ = tf.scalar_summary('accuracy', accuracy)
+
+    # Add summary ops to collect data
+    _ = tf.histogram_summary('weights', W)
+    _ = tf.histogram_summary('biases', b)
+    _ = tf.histogram_summary('y', y)
+
+    _ = tf.image_summary('images', tf.reshape(mnist.test.images, [10000,28,28,1]))
+
+    merged = tf.merge_all_summaries()
+    saver = tf.train.Saver()
+
+    init = tf.initialize_all_variables()
+    sess = tf.Session()
+
+    writer = tf.train.SummaryWriter('logs', sess.graph_def)
+
+    sess.run(init)
+
+    for step in range(2000):
+        if step % 10 == 0:
+            saver.save(sess, 'logs', global_step=step)
+            feed = {x: mnist.test.images, y_: mnist.test.labels}
+            summary_str, acc = sess.run([merged, accuracy], feed_dict=feed)
+            writer.add_summary(summary_str, step)
+            print('Accuracy at step %s: %s' % (step, acc))
+        else:
+            batch_xs, batch_ys = mnist.train.next_batch(100)
+            sess.run(train_step, feed_dict={x: batch_xs, y_: batch_ys})
+
+    print sess.run(accuracy, feed_dict={x: mnist.test.images, y_: mnist.test.labels})
+
+
+def checkpoint(train=True):
+    mnist = input_data.read_data_sets('MNIST_data/', one_hot=True)
+
+    x = tf.placeholder(tf.float32, [None, 784], name='x-input')
+    W = tf.Variable(tf.zeros([784, 10]), name='weights')
+    b = tf.Variable(tf.zeros([10]), name='bias')
+    y = tf.nn.softmax(tf.matmul(x, W) + b)
+    y_ = tf.placeholder(tf.float32, [None, 10])
+    cross_entropy = -tf.reduce_sum(y_*tf.log(y))
+    _ = tf.scalar_summary("cross entropy", cross_entropy)
+
+    train_step = tf.train.GradientDescentOptimizer(0.01).minimize(cross_entropy)
+
+    correct_prediction = tf.equal(tf.argmax(y,1), tf.argmax(y_,1))
+    accuracy = tf.reduce_mean(tf.cast(correct_prediction, 'float'))
+    _ = tf.scalar_summary('accuracy', accuracy)
+
+    # Add summary ops to collect data
+    _ = tf.histogram_summary('weights', W)
+    _ = tf.histogram_summary('biases', b)
+    _ = tf.histogram_summary('y', y)
+
+    _ = tf.image_summary('images', tf.reshape(mnist.test.images, [10000, 28, 28, 1]))
+
+    merged = tf.merge_all_summaries()
+    saver = tf.train.Saver()
+
+    with tf.Session() as sess:
+        init = tf.initialize_all_variables()
+        sess.run(init)
+
+        if train:
+            writer = tf.train.SummaryWriter('logs', sess.graph_def)
+            for step in range(1000):
+                if step % 10 == 0:
+                    saver.save(sess, 'logs/checkpoint', global_step=step)
+                    feed = {x: mnist.test.images, y_: mnist.test.labels}
+                    summary_str, acc = sess.run([merged, accuracy], feed_dict=feed)
+                    writer.add_summary(summary_str, step)
+                    print('Accuracy at step %s: %s' % (step, acc))
+                else:
+                    batch_xs, batch_ys = mnist.train.next_batch(100)
+                    sess.run(train_step, feed_dict={x: batch_xs, y_: batch_ys})
+
+            print sess.run(accuracy, feed_dict={x: mnist.test.images, y_: mnist.test.labels})
+        else:
+            check_point = tf.train.get_checkpoint_state('logs')
+            if checkpoint and check_point.model_checkpoint_path:
+                saver.restore(sess, check_point.model_checkpoint_path)
+                print sess.run(accuracy, feed_dict={x: mnist.test.images, y_: mnist.test.labels})
+            else:
+                print 'error'
+
+
 def main():
+    parser = argparse.ArgumentParser(description='TensorFlow demo')
+    parser.add_argument('-train', action='store_true',  default=False, help='train flag')
+    args = parser.parse_args()
     start = time.time()
-    cnn()
+    checkpoint(args.train)
     end = time.time()
     print 'CPU time is %f seconds.' % (end - start)
 
