@@ -41,8 +41,38 @@ def elastic_distortion(image, alpha, sigma):
     x, y = np.meshgrid(np.arange(s[0]), np.arange(s[1]))
     indices = np.reshape(y+dy, (-1, 1)), np.reshape(x+dx, (-1, 1))
     return map_coordinates(image, indices, order=1).reshape(s)
-
-
+def add_bound(img):
+    im = np.uint8(img)
+    (cnts, _) = cv2.findContours(im.copy(), cv2.RETR_EXTERNAL,
+    cv2.CHAIN_APPROX_SIMPLE)        
+    for c in cnts:
+        if cv2.contourArea(c) < 20:
+            continue 
+    (x, y, w, h) = cv2.boundingRect(c)
+    cv2.rectangle(im, (x, y), (x + w, y + h), (100, 255, 0), 1)
+    return -1*(x+w/2),-1*(y+h/2)#,im
+    
+def move_to_centre(res,origin):
+    res_w,res_h = add_bound(res)
+    train_w,train_h = add_bound(origin)
+#    res_w,res_h,res = add_bound(res)
+#    train_w,train_h,origin = add_bound(origin)    
+    rows,cols = res.shape
+    M = np.float32([[1,0,-1*(train_w-res_w)],[0,1,-1*(train_h-res_h)]])
+    dst = cv2.warpAffine(res,M,(cols,rows))
+    return dst
+def deskew(img):
+     n,m = img.shape
+     SZ = n
+     affine_flags = cv2.WARP_INVERSE_MAP|cv2.INTER_LINEAR
+     m = cv2.moments(img)
+     if abs(m['mu02']) < 1e-2:
+         return img.copy()
+     skew = m['mu11']/m['mu02']
+     M = np.float32([[1, skew, -0.5*SZ*skew], [0, 1, 0]])
+     img = cv2.warpAffine(img,M,(SZ, SZ),flags=affine_flags)
+     n,m = img.shape
+     return img
 
 def get_mlp():
     """
@@ -87,6 +117,36 @@ def get_lenet():
     lenet = mx.symbol.SoftmaxOutput(data=fc2, name='softmax')
     return lenet
 
+
+def get_mirror():
+    data = mx.symbol.Variable('data')
+    # first conv
+    conv1 = mx.symbol.Convolution(data=data, kernel=(5,5), num_filter=32)
+    relu1 = mx.symbol.Activation(data=conv1, act_type="relu")
+    pool1 = mx.symbol.Pooling(data=relu1, pool_type="max",
+                              kernel=(2,2), stride=(2,2))
+    # second conv
+    conv2 = mx.symbol.Convolution(data=pool1, kernel=(5,5), num_filter=64)
+    tanh2 = mx.symbol.Activation(data=conv2, act_type="relu")
+    pool2 = mx.symbol.Pooling(data=tanh2, pool_type="max",
+                              kernel=(2,2), stride=(2,2))
+    # first fullc
+    flatten1 = mx.symbol.Flatten(data=pool2)
+    fc1 = mx.symbol.FullyConnected(data=flatten, num_hidden=1024)
+    tanh3 = mx.symbol.Activation(data=fc1, act_type="tanh")
+    
+    # second fullc
+    flatten2 = mx.symbol.Flatten(data=tanh3)
+    fc2 = mx.symbol.FullyConnected(data=flatten, num_hidden=1024)
+    tanh4 = mx.symbol.Activation(data=fc1, act_type="tanh")   
+    
+    # third fullc
+    fc2 = mx.symbol.FullyConnected(data=tanh3, num_hidden=10)
+    # loss
+    lenet = mx.symbol.SoftmaxOutput(data=fc2, name='softmax')
+    return lenet
+
+
 def get_dnn():
     data = mx.symbol.Variable('data')
     # first conv
@@ -118,9 +178,13 @@ def train_data_refresh():
     np.random.shuffle(index)
     train_data = train_data[index]
     train_label = train_label[index]
+    
+    # skip refreshing, just for test
+#    train_data_tmp = train_data
+    
     print 'data refresh start...'
     for i in range(len(train_data)):
-        train_data_tmp[i,0] = elastic_distortion(train_data[i,0],500,30)
+        train_data_tmp[i,0] = move_to_centre(elastic_distortion(train_data[i,0],300,10),train_data[i,0])
     print 'first 100 train mark: %.0f - %.0f' %(np.sum(train_data[0:100]),np.sum(train_data_tmp[0:100]))
     print 'data refresh finish...'
 
@@ -173,10 +237,16 @@ def makePrediction(model,shape):
     
 #prefix = 'cnn_00_' # 28*28,, shuffle,anneal_lr=0.994,basic_lr=0.003,batch_size=256,, 98.5+
 #prefix = 'cnn_01_' # 28*28,, shuffle,anneal_lr=0.994,basic_lr=0.003,batch_size=128,, 98.7+
+prefix = 'cnn_01_1' # 28*28,, shuffle,anneal_lr=0.994,basic_lr=0.003,batch_size=128,, 98.7+   
 #prefix = 'cnn_02_' # 28*28,, shuffle,anneal_lr=0.991,basic_lr=0.0018,batch_size=128,, 98.6+
 #prefix = 'cnn_03_' # 28*28,, shuffle,anneal_lr=0.994,basic_lr=0.003,batch_size=64,, 98.6+
-#prefix = 'cnn_04_' # 28*28,, shuffle,anneal_lr=0.99,basic_lr=0.002,batch_size=50,, 98.7+
-prefix = 'cnn_05_' # 28*28,, shuffle,distortion(500,30),anneal_lr=0.994,basic_lr=0.003,batch_size=128,,
+#prefix = 'cnn_04_' # 28*28,, shuffle,anneal_lr=0.990,basic_lr=0.002,batch_size=50,, 98.7+
+#prefix = 'cnn_05_' # 28*28,, shuffle,distortion(500,30),anneal_lr=0.994,basic_lr=0.003,batch_size=128,, 98.5
+#prefix = 'cnn_06_' # 28*28,, shuffle,distortion(300,15),anneal_lr=0.990,basic_lr=0.002,batch_size=128,, 97.7
+#prefix = 'cnn_07_'  # 28*28,, shuffle,distortion(300,10),anneal_lr=0.994,basic_lr=0.003,batch_size=128,, 98.0
+#prefix = 'cnn_08_'  # 28*28,, shuffle,distortion(75,6),anneal_lr=0.994,basic_lr=0.003,batch_size=128,, 98.0
+#prefix = 'cnn_09_'  # 28*28,, shuffle,movetocenter,distortion(300,10),anneal_lr=0.994,basic_lr=0.003,batch_size=128,,
+
 
 check_point_step = 20
 load_target = 0
@@ -189,15 +259,19 @@ if not 'train_data' in dir() or not 'train_label' in dir():
     train_data = genfromtxt(open('data.csv','r'), delimiter=',', dtype='f8')
     train_data = train_data.reshape((len(train_data),1,28,28))
     train_label = genfromtxt(open('data_label.csv','r'), delimiter=',', dtype='f8')
-train_data_tmp = np.zeros_like(train_data)
+    train_data_tmp = np.zeros_like(train_data)
 if not 'valid_data' in dir():
-    valid_data = mx.io.CSVIter(
-        data_csv='valid.csv',
-        data_shape=data_shape,
-        label_csv='valid_label.csv',
-        label_shape=(1,),
-        batch_size=512)
-valid_data.reset()
+    valid_data = genfromtxt(open('valid.csv','r'), delimiter=',', dtype='f8')
+    valid_data = valid_data.reshape((len(valid_data),1,28,28))
+    valid_label = genfromtxt(open('valid_label.csv','r'), delimiter=',', dtype='f8')
+
+#    valid_data = mx.io.CSVIter(
+#        data_csv='valid.csv',
+#        data_shape=data_shape,
+#        label_csv='valid_label.csv',
+#        label_shape=(1,),
+#        batch_size=512)
+#valid_data.reset()
 #--------------------- model establish
 if load_target > 0:
     model = mx.model.FeedForward.load(
@@ -216,7 +290,8 @@ with Timer() as t:
     model.fit(
         X = train_data_tmp,
         y = train_label,
-        eval_data= valid_data,
+#        eval_data= valid_data,
+        eval_data= (valid_data,valid_label),
         kvstore = None,
         batch_end_callback = batch_callback,
         epoch_end_callback = epoch_callback
@@ -226,18 +301,13 @@ print "=> trained[%d->%d] cost: %s s" %(load_target,load_target+iteration_target
 #--------------------- prediction
 #makePrediction(model,data_shape)
 
-
-#--------------------- draw test
-#plt.gray()
 #list_ = []
 #for i in range(8):
 #    list_.append('original image:%d' %i)
 #    list_.append(train_data[i,0])
 #    list_.append('distort')
-#    list_.append(elastic_distortion(train_data[i,0],500,30))
+#    list_.append(elastic_distortion(train_data[i,0],75,6))
 #drawFigures(list_)
-
-
 
 
 
