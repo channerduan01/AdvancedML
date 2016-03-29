@@ -46,7 +46,7 @@ def deskew(image):
 def add_bound(img):
     im = np.uint8(img)
     (cnts, _) = cv2.findContours(im.copy(), cv2.RETR_EXTERNAL,
-    cv2.CHAIN_APPROX_SIMPLE)        
+    cv2.CHAIN_APPROX_SIMPLE)
     for c in cnts:
         if cv2.contourArea(c) < 20:
             continue 
@@ -93,14 +93,14 @@ image = cv2.cvtColor(cv2.imread('model_image.jpg'),cv2.COLOR_RGB2GRAY)
 
 
 list_ = []
-for i in range(8):
+for i in range(20):
     list_.append('original image:%d' %i)
     list_.append(train_data[i,0])
     list_.append('distort')
     
 #    list_.append(shear_image(train_data[i,0]))
 #    list_.append(elastic_distortion(train_data[i,0],300,10))
-    list_.append(move_to_centre(elastic_distortion(train_data[i,0],300,10),train_data[i,0]))
+    list_.append(move_to_centre(elastic_distortion(train_data[i,0],75,6),train_data[i,0]))
 #    list_.append(deskew(train_data[i,0]))    
     
-drawFigures(list_)
+drawFigures(list_,width=6)

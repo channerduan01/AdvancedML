@@ -72,14 +72,14 @@ def drawSet(set_,label):
 if not 'test_data' in dir():
     test_data = genfromtxt(open('test_ready.csv','r'), delimiter=',', dtype='f8')
     test_data = test_data.reshape((len(test_data),1,28,28))
-def coupledPredict(list_vesions):
+def coupledPredict(list_vesions,epoch=100):
     with Timer() as t:
         res_ = np.zeros((len(test_data),10),np.float)
         for v_ in list_versions:
             print "%s_predicting" %v_
             model = mx.model.FeedForward.load(
                 prefix=v_,
-                epoch=100
+                epoch=epoch
                 )
             res = model.predict(test_data)
             res_ += res
@@ -90,37 +90,40 @@ def coupledPredict(list_vesions):
 
 
 plt.gray()
-#list_versions = ['cnn_01_','cnn_05_','cnn_06_','cnn_07_','cnn_08_']
-#list_versions = ['cnn_05_','cnn_07_','cnn_08_']
-list_versions = ['cnn_01_','cnn_05_','cnn_06_','cnn_08_','cnn_09_']
+#list_versions = ['cnn_01_','cnn_07_','cnn_08_','cnn_09_','cnn_10_']  # 0.99014
+#list_versions = ['cnn_01_','cnn_05_','cnn_06_','cnn_08_','cnn_09_']  # 0.99086
+#list_versiosns = ['cnn_01_','cnn_01_1','cnn_01_2','cnn_01_3']  # 0.98957
+#list_versions = ['cnn_01_','cnn_05_','cnn_06_','cnn_08_','cnn_09_','cnn_10_','cnn_10_1']  # 0.99014
+#list_versions = ['cnn_01_','cnn_05_','cnn_06_','cnn_08_','cnn_09_','cnn_10_']   # 0.99014
+#list_versions = ['cnn_01_1','cnn_05_','cnn_06_','cnn_08_','cnn_09_']    # 0.99114(100) 0.99086(80)
+list_versions = ['cnn_01_2','cnn_05_','cnn_06_','cnn_08_','cnn_09_'] 
 
+epoch_num = 100
 
-coupledPredict(list_versions)
+#coupledPredict(list_versions,epoch_num)
 
-
-#data = valid_data
-#label = valid_label.astype(np.uint8)
-#list_ = []
-#res_ = np.zeros((len(data),10),np.float)
-#for v_ in list_versions:
-#    print "%s:" %v_
-#    model = mx.model.FeedForward.load(
-#        prefix=v_,
-#        epoch=100
-#        )
-#    indices, res = validationAnalysis(model,data,label)
-#    res_ += res
-#    list_.append(indices)
-#    
-#res = np.argsort(res_,1)[:,-1]
-#coupled_predict = np.where(res != label)[0]
-#print "coupled correct-rate:%6f (err_num:%d)" %(1.0-float(len(coupled_predict))/float(len(label)),len(coupled_predict))
+data = valid_data
+label = valid_label.astype(np.uint8)
+list_ = []
+res_ = np.zeros((len(data),10),np.float)
+for v_ in list_versions:
+    print "%s:" %v_
+    model = mx.model.FeedForward.load(
+        prefix=v_,
+        epoch=epoch_num
+        )
+    indices, res = validationAnalysis(model,data,label)
+    res_ += res
+    list_.append(indices)
+    
+res = np.argsort(res_,1)[:,-1]
+coupled_predict = np.where(res != label)[0]
+print "coupled correct-rate:%6f (err_num:%d)" %(1.0-float(len(coupled_predict))/float(len(label)),len(coupled_predict))
 
 
 #setComparison(set(list_[0]),set(list_[-3]),data,True)
 
 #validationAnalysis(model,data,label,show=True)
-
 
 ## draw the shared error images
 #size = len(list_)

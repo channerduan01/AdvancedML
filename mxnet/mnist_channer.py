@@ -9,6 +9,7 @@ sys.path.append("../common")
 import mxnet as mx
 from timer import Timer
 import numpy as np
+import cv2
 import mxnet.optimizer as opt
 from numpy import genfromtxt, savetxt
 
@@ -146,7 +147,7 @@ def get_mirror():
     lenet = mx.symbol.SoftmaxOutput(data=fc2, name='softmax')
     return lenet
 
-
+# 20 + 20*40 = 820 filters
 def get_dnn():
     data = mx.symbol.Variable('data')
     # first conv
@@ -169,7 +170,6 @@ def get_dnn():
     lenet = mx.symbol.SoftmaxOutput(data=fc2, name='softmax')
     return lenet
     
-
 def train_data_refresh():
     global train_data
     global train_label
@@ -179,12 +179,12 @@ def train_data_refresh():
     train_data = train_data[index]
     train_label = train_label[index]
     
-    # skip refreshing, just for test
+#    #skip refreshing, just for test
 #    train_data_tmp = train_data
     
     print 'data refresh start...'
     for i in range(len(train_data)):
-        train_data_tmp[i,0] = move_to_centre(elastic_distortion(train_data[i,0],300,10),train_data[i,0])
+        train_data_tmp[i,0] = move_to_centre(elastic_distortion(train_data[i,0],500,30),train_data[i,0])
     print 'first 100 train mark: %.0f - %.0f' %(np.sum(train_data[0:100]),np.sum(train_data_tmp[0:100]))
     print 'data refresh finish...'
 
@@ -234,10 +234,12 @@ def makePrediction(model,shape):
     print "=> prediction cost: %s s" % t.secs
     savetxt('submission.csv', np.c_[np.arange(1, res.size+1), res], delimiter=',', header='ImageId,Label', fmt='%d', comments='')
     return
-    
+
 #prefix = 'cnn_00_' # 28*28,, shuffle,anneal_lr=0.994,basic_lr=0.003,batch_size=256,, 98.5+
-#prefix = 'cnn_01_' # 28*28,, shuffle,anneal_lr=0.994,basic_lr=0.003,batch_size=128,, 98.7+
-prefix = 'cnn_01_1' # 28*28,, shuffle,anneal_lr=0.994,basic_lr=0.003,batch_size=128,, 98.7+   
+#prefix = 'cnn_01_' # 28*28,, shuffle,anneal_lr=0.994,basic_lr=0.003,batch_size=128,, 0.98786
+#prefix = 'cnn_01_1' # 28*28,, shuffle,anneal_lr=0.994,basic_lr=0.003,batch_size=128,, 0.98743
+#prefix = 'cnn_01_2' # 28*28,, shuffle,anneal_lr=0.994,basic_lr=0.003,batch_size=128,, 0.98600
+#prefix = 'cnn_01_3' # 28*28,, shuffle,anneal_lr=0.994,basic_lr=0.003,batch_size=128,, 0.98614
 #prefix = 'cnn_02_' # 28*28,, shuffle,anneal_lr=0.991,basic_lr=0.0018,batch_size=128,, 98.6+
 #prefix = 'cnn_03_' # 28*28,, shuffle,anneal_lr=0.994,basic_lr=0.003,batch_size=64,, 98.6+
 #prefix = 'cnn_04_' # 28*28,, shuffle,anneal_lr=0.990,basic_lr=0.002,batch_size=50,, 98.7+
@@ -245,7 +247,12 @@ prefix = 'cnn_01_1' # 28*28,, shuffle,anneal_lr=0.994,basic_lr=0.003,batch_size=
 #prefix = 'cnn_06_' # 28*28,, shuffle,distortion(300,15),anneal_lr=0.990,basic_lr=0.002,batch_size=128,, 97.7
 #prefix = 'cnn_07_'  # 28*28,, shuffle,distortion(300,10),anneal_lr=0.994,basic_lr=0.003,batch_size=128,, 98.0
 #prefix = 'cnn_08_'  # 28*28,, shuffle,distortion(75,6),anneal_lr=0.994,basic_lr=0.003,batch_size=128,, 98.0
+
 #prefix = 'cnn_09_'  # 28*28,, shuffle,movetocenter,distortion(300,10),anneal_lr=0.994,basic_lr=0.003,batch_size=128,,
+#prefix = 'cnn_10_'  # 28*28,, shuffle,movetocenter,distortion(75,6),anneal_lr=0.994,basic_lr=0.003,batch_size=128,,
+#prefix = 'cnn_10_1'  # 28*28,, shuffle,movetocenter,distortion(75,6),anneal_lr=0.994,basic_lr=0.003,batch_size=128,,
+#prefix = 'cnn_10_2'  # 28*28,, shuffle,movetocenter,distortion(75,6),anneal_lr=0.994,basic_lr=0.003,batch_size=128,,
+prefix = 'cnn_11_'  # 28*28,, shuffle,movetocenter,distortion(500,30),anneal_lr=0.994,basic_lr=0.003,batch_size=128,,
 
 
 check_point_step = 20
@@ -285,19 +292,19 @@ else:
     model = createModel()
     model.num_epoch = iteration_target
 #--------------------- model training
-with Timer() as t:
-    train_data_refresh()
-    model.fit(
-        X = train_data_tmp,
-        y = train_label,
-#        eval_data= valid_data,
-        eval_data= (valid_data,valid_label),
-        kvstore = None,
-        batch_end_callback = batch_callback,
-        epoch_end_callback = epoch_callback
-        )
-    model.save(prefix, model.num_epoch)
-print "=> trained[%d->%d] cost: %s s" %(load_target,load_target+iteration_target,t.secs)
+#with Timer() as t:
+#    train_data_refresh()
+#    model.fit(
+#        X = train_data_tmp,
+#        y = train_label,
+##        eval_data= valid_data,
+#        eval_data= (valid_data,valid_label),
+#        kvstore = None,
+#        batch_end_callback = batch_callback,
+#        epoch_end_callback = epoch_callback
+#        )
+#    model.save(prefix, model.num_epoch)
+#print "=> trained[%d->%d] cost: %s s" %(load_target,load_target+iteration_target,t.secs)
 #--------------------- prediction
 #makePrediction(model,data_shape)
 
